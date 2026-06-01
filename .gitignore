@@ -1,0 +1,21 @@
+# 依赖
+node_modules/
+app-android/node_modules/
+
+# Capacitor 在云端生成的原生工程（CI 每次重建，不必入库）
+app-android/android/
+
+# 敏感 / 私人数据 —— 千万别推到 GitHub
+config.json
+conversations/
+
+# 体积太大的二进制（自行下载，不入库）
+cloudflared.exe
+
+# 生成的二维码图片
+qr*.png
+
+# 杂项
+*.log
+.DS_Store
+_smoketest.mjs

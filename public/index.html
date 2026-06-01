@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b0d12" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ClaudeRemote" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Claude Code 遥控</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span id="dot" class="dot offline"></span>
+      <span class="title">Claude Code</span>
+    </div>
+    <div class="top-actions">
+      <button id="historyBtn" class="icon-btn" aria-label="聊天记录">🕘</button>
+      <button id="scanBtn" class="icon-btn" aria-label="扫码连接">⛶</button>
+      <button id="folderBtn" class="icon-btn" aria-label="工作目录">📁</button>
+      <label class="auto-toggle" title="全自动放行">
+        <input type="checkbox" id="autoToggle" />
+        <span class="switch"></span>
+        <span class="auto-label">全自动</span>
+      </label>
+      <button id="settingsBtn" class="icon-btn" aria-label="设置">⚙</button>
+    </div>
+  </header>
+
+  <button id="cwdBar" class="cwd-bar hidden" aria-label="切换工作目录"></button>
+
+  <main id="messages" class="messages">
+    <div id="emptyState" class="empty-state">
+      <div class="empty-logo">✦</div>
+      <div class="empty-title">在手机上指挥 Claude Code</div>
+      <div class="empty-sub">下面输入指令，或点一个快捷命令开始。</div>
+    </div>
+  </main>
+
+  <button id="toBottom" class="to-bottom hidden" aria-label="回到底部">↓</button>
+
+  <div id="permModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title" id="permTitle">Claude 想要执行操作</div>
+      <div class="modal-tool" id="permTool"></div>
+      <pre class="modal-body" id="permBody"></pre>
+      <div class="modal-actions">
+        <button id="permDeny" class="btn btn-deny">拒绝</button>
+        <button id="permAlways" class="btn btn-ghost">总是允许此工具</button>
+        <button id="permAllow" class="btn btn-allow">允许</button>
+      </div>
+      <button id="permAuto" class="btn-link">从现在起全自动，不再问我</button>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title">设置</div>
+      <label class="field-label">模型</label>
+      <select id="modelSelect" class="text-input">
+        <option value="claude-opus-4-8">Opus 4.8（最强）</option>
+        <option value="claude-sonnet-4-6">Sonnet 4.6（快·均衡）</option>
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5（最快·最省）</option>
+      </select>
+      <label class="field-label">思考档位 effort（越高越深入、越慢）</label>
+      <select id="effortSelect" class="text-input">
+        <option value="low">low · 最快</option>
+        <option value="medium">medium · 中等</option>
+        <option value="high">high · 深入（默认）</option>
+        <option value="xhigh">xhigh · 更深（Opus 4.7+）</option>
+        <option value="max">max · 最大</option>
+      </select>
+      <div class="hint">切换模型即时生效（保留当前对话）；切换思考档位会重开一个新对话。</div>
+      <div class="divider"></div>
+      <label class="row-toggle">
+        <span>
+          <span class="row-toggle-title">完成 / 需授权时通知我</span>
+          <span class="row-toggle-sub" id="notifyStatus">App 在后台时震动并弹通知</span>
+        </span>
+        <span class="mini-switch"><input type="checkbox" id="notifyToggle" /><span class="mini-track"></span></span>
+      </label>
+      <div class="divider"></div>
+      <label class="field-label">快捷命令（每行一条；用「标题 | 内容」可分别设置显示与发送文本）</label>
+      <textarea id="quickEdit" class="text-input" rows="6" placeholder="继续&#10;提交 | 把当前改动提交，写一个清晰的中文 commit message"></textarea>
+      <button id="quickSave" class="btn btn-ghost full">保存快捷命令</button>
+      <button id="quickReset" class="btn-link">恢复默认快捷命令</button>
+      <div class="divider"></div>
+      <label class="field-label">工作目录（Claude 操作的项目文件夹）</label>
+      <input type="text" id="cwdInput" class="text-input" placeholder="例如 D:\\projects\\my-app" />
+      <button id="cwdApply" class="btn btn-allow full">切换工作目录</button>
+      <div class="divider"></div>
+      <label class="field-label">服务器地址</label>
+      <input type="text" id="serverInput" class="text-input" placeholder="自动使用当前网址" />
+      <label class="field-label">Token</label>
+      <input type="text" id="tokenInput" class="text-input" placeholder="连接密钥" />
+      <button id="connApply" class="btn btn-ghost full">保存并重新连接</button>
+      <div class="divider"></div>
+      <div class="hint" id="connInfo"></div>
+      <button id="settingsClose" class="btn-link">关闭</button>
+    </div>
+  </div>
+
+  <div id="browserModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title">选择工作目录</div>
+      <div class="browser-path" id="browserPath">…</div>
+      <div class="browser-list" id="browserList"></div>
+      <div class="browser-actions">
+        <button id="browserUp" class="btn btn-ghost">⬆ 上一级</button>
+        <button id="browserMkdir" class="btn btn-ghost">＋ 新建文件夹</button>
+        <button id="browserPick" class="btn btn-allow">✓ 就在这里工作</button>
+      </div>
+      <button id="browserClose" class="btn-link">取消</button>
+    </div>
+  </div>
+
+  <div class="composer-wrap">
+    <div id="quickBar" class="quick-bar"></div>
+    <div id="attachBar" class="attach-bar hidden"></div>
+    <footer class="composer">
+      <button id="stopBtn" class="icon-btn stop hidden" aria-label="停止">■</button>
+      <button id="attachBtn" class="icon-btn attach" aria-label="添加图片">📎</button>
+      <input type="file" id="imageInput" accept="image/*" multiple hidden />
+      <textarea id="input" class="composer-input" rows="1" placeholder="给 Claude 下指令…"></textarea>
+      <button id="sendBtn" class="send-btn" aria-label="发送">↑</button>
+    </footer>
+  </div>
+
+  <div id="historyModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title">聊天记录</div>
+      <div class="hint">点一条继续之前的对话（保留上下文，省 token）；左侧 ✎ 重命名、🗑 删除。</div>
+      <button id="newConvBtn" class="btn btn-allow full">＋ 开始新对话</button>
+      <div class="conv-list" id="convList"></div>
+      <button id="historyClose" class="btn-link">关闭</button>
+    </div>
+  </div>
+
+  <div id="scanModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title">扫码连接电脑</div>
+      <video id="scanVideo" playsinline muted></video>
+      <canvas id="scanCanvas" style="display:none"></canvas>
+      <div class="hint" id="scanHint">把电脑「控制台」网页上的二维码对准取景框…</div>
+      <button id="scanClose" class="btn-link">取消</button>
+    </div>
+  </div>
+
+  <script src="jsqr.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

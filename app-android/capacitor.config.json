@@ -1,0 +1,12 @@
+{
+  "appId": "com.claude.remote",
+  "appName": "Claude遥控",
+  "webDir": "../public",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Claude Code 遥控 · 控制台</title>
+<style>
+  :root{--bg:#0b0d12;--bg2:#12151d;--panel:#171b24;--panel2:#1d222d;--border:#272d3a;--text:#e7ebf2;--muted:#8b93a4;--accent:#d97757;--green:#2f9e58;--red:#d9534f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;padding:18px;line-height:1.5}
+  .wrap{max-width:920px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .brand{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--muted)}
+  .dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .badge{background:var(--panel2);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:13px;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:300px 1fr;gap:16px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px}
+  .card h3{margin:0 0 12px;font-size:14px;color:var(--muted);font-weight:600;letter-spacing:.3px}
+  .qrbox{background:#fff;border-radius:12px;padding:10px;display:flex;align-items:center;justify-content:center;min-height:240px}
+  .qrbox img{width:100%;max-width:260px;display:block}
+  .qrbox .ph{color:#888;font-size:13px;text-align:center;padding:30px}
+  .url{font-family:"SF Mono",Consolas,monospace;font-size:12.5px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;word-break:break-all;color:#cdd4e0;margin:10px 0}
+  .tstat{font-size:13px;margin-bottom:10px}
+  .tstat b{color:var(--accent)}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 13px;font-size:13.5px;cursor:pointer;font-family:inherit}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{color:#f3b6b4;border-color:var(--red)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  label.fld{display:block;font-size:12.5px;color:var(--muted);margin:12px 0 6px}
+  select,input[type=text]{width:100%;padding:9px 11px;font-size:14px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:inherit;outline:none}
+  select:focus,input:focus{border-color:var(--accent)}
+  .toggle{display:flex;align-items:center;gap:10px;margin-top:14px;cursor:pointer;user-select:none}
+  .sw{width:42px;height:24px;border-radius:12px;background:var(--panel2);border:1px solid var(--border);position:relative;transition:.2s}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:.2s}
+  .toggle.on .sw{background:rgba(217,119,87,.25);border-color:var(--accent)}
+  .toggle.on .sw::after{transform:translateX(18px);background:var(--accent)}
+  .log{background:#0a0c11;border:1px solid var(--border);border-radius:10px;padding:10px;height:200px;overflow-y:auto;font-family:"SF Mono",Consolas,monospace;font-size:12px;color:#aeb6c4;white-space:pre-wrap}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px}
+  .cwd-cur{font-family:"SF Mono",Consolas,monospace;font-size:12.5px;color:#cdd4e0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;word-break:break-all;margin-bottom:8px}
+  /* 文件夹选择器 */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
+  .modal.hidden{display:none}
+  .modal .box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;width:560px;max-width:92vw;max-height:84vh;display:flex;flex-direction:column}
+  .picker-path{font-family:Consolas,monospace;font-size:12px;color:var(--muted);margin:6px 0 10px;word-break:break-all}
+  .picker-list{border:1px solid var(--border);border-radius:9px;overflow-y:auto;flex:1;min-height:200px;background:var(--bg2)}
+  .pi{display:flex;gap:9px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);font-size:14px}
+  .pi.dir{cursor:pointer}.pi.dir:hover{background:var(--panel2)}.pi.file{color:var(--muted)}
+  .picker-actions{display:flex;gap:8px;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span id="dot" class="dot"></span>Claude Code 遥控 · 控制台</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="badge" id="phones">已连接手机: 0</div>
+      <button id="btnQuit" class="danger" title="停止服务并退出">⏻ 退出</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h3>📱 手机扫码连接（公网）</h3>
+        <div class="qrbox"><div class="ph" id="qrPh">隧道启动中…<br>稍等十几秒</div><img id="qr" style="display:none"/></div>
+        <div class="url" id="url">等待公网地址…</div>
+        <div class="tstat">隧道状态：<b id="tstat">启动中</b></div>
+        <div class="row">
+          <button class="primary" id="btnRestart">↻ 重新生成地址</button>
+          <button id="btnTunnel">停止隧道</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="btnCopy">📋 复制链接</button>
+          <button id="btnPreview">🖥 预览手机端</button>
+        </div>
+        <div class="hint">公网地址每次重启会变，手机需重新扫码。装了 Tailscale 后可换固定地址。</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h3>⚙ 会话设置</h3>
+        <label class="fld">模型（即时生效，保留对话）</label>
+        <select id="model">
+          <option value="claude-opus-4-8">Opus 4.8（最强）</option>
+          <option value="claude-sonnet-4-6">Sonnet 4.6（快·均衡）</option>
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5（最快最省）</option>
+        </select>
+        <label class="fld">思考档位 effort（切换会重开新对话）</label>
+        <select id="effort">
+          <option value="low">low · 最快</option>
+          <option value="medium">medium · 中等</option>
+          <option value="high">high · 深入（默认）</option>
+          <option value="xhigh">xhigh · 更深</option>
+          <option value="max">max · 最大</option>
+        </select>
+        <div class="toggle" id="autoToggle"><span class="sw"></span><span>全自动放行（不再逐条确认）</span></div>
+      </div>
+
+      <div class="card">
+        <h3>📁 工作目录</h3>
+        <div class="cwd-cur" id="cwdCur">—</div>
+        <div class="row">
+          <input type="text" id="cwdInput" placeholder="D:\\projects\\my-app" style="flex:1"/>
+          <button id="btnCwd">应用</button>
+          <button id="btnBrowse">浏览…</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>📜 实时日志</h3>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="picker">
+  <div class="box">
+    <h3 style="margin:0 0 4px;color:var(--muted)">选择工作目录</h3>
+    <div class="picker-path" id="pkPath">…</div>
+    <div class="picker-list" id="pkList"></div>
+    <div class="picker-actions">
+      <button id="pkUp">⬆ 上一级</button>
+      <button id="pkMkdir">＋ 新建</button>
+      <button class="primary" id="pkPick">✓ 就用这里</button>
+      <button id="pkClose">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let ws,connected=false,tunnel={status:"starting",url:null,full:null};
+let pkCur="",pkParent=null;
+
+function connect(){
+  ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/control");
+  ws.onopen=()=>{connected=true;$("dot").classList.add("on")};
+  ws.onclose=()=>{connected=false;$("dot").classList.remove("on");setTimeout(connect,1500)};
+  ws.onmessage=e=>handle(JSON.parse(e.data));
+}
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
+
+function handle(m){
+  switch(m.type){
+    case"controlHello":
+      setTunnel(m.tunnel);
+      if(m.model)setSel("model",m.model);
+      if(m.effort)setSel("effort",m.effort);
+      setAuto(m.autoApprove);
+      $("cwdCur").textContent=m.cwd||"—";$("cwdInput").value=m.cwd||"";
+      $("phones").textContent="已连接手机: "+(m.phones||0);
+      $("log").textContent="";(m.log||[]).forEach(addLog);
+      break;
+    case"tunnel":setTunnel(m);break;
+    case"phones":$("phones").textContent="已连接手机: "+(m.phones||0);break;
+    case"optionChanged":if(m.model)setSel("model",m.model);if(m.effort)setSel("effort",m.effort);break;
+    case"auto":setAuto(m.value);break;
+    case"log":addLog(m.line);break;
+    case"dirList":renderPicker(m);break;
+    case"dirError":alert(m.message);break;
+    case"bye":document.body.innerHTML='<div style="padding:60px;text-align:center;color:#8b93a4;font-size:18px">已停止。可以关掉这个窗口了。</div>';break;
+  }
+}
+function setTunnel(t){
+  tunnel=Object.assign(tunnel,t);
+  const s=t.status||tunnel.status;
+  $("tstat").textContent=s==="up"?"已就绪 ✓":s==="starting"?"启动中…":"已停止";
+  $("btnTunnel").textContent=s==="up"||s==="starting"?"停止隧道":"启动隧道";
+  if(t.full){tunnel.full=t.full;$("url").textContent=t.full}
+  else if(s!=="up"){$("url").textContent="（隧道未运行）"}
+  if(t.qr){$("qr").src=t.qr;$("qr").style.display="block";$("qrPh").style.display="none"}
+  if(s!=="up"){$("qr").style.display="none";$("qrPh").style.display="block";$("qrPh").innerHTML=(s==="starting"?"隧道启动中…<br>稍等十几秒":"隧道已停止")}
+}
+function setSel(id,v){const el=$(id);if(![...el.options].some(o=>o.value===v)){const o=document.createElement("option");o.value=v;o.textContent=v;el.appendChild(o)}el.value=v}
+function setAuto(v){$("autoToggle").classList.toggle("on",!!v)}
+function addLog(line){const l=$("log");l.textContent+=(l.textContent?"\n":"")+line;l.scrollTop=l.scrollHeight}
+
+$("btnQuit").onclick=()=>{ if(confirm("停止服务并退出？手机将断开连接。")) send({type:"shutdown"}); };
+$("btnRestart").onclick=()=>send({type:"restartTunnel"});
+$("btnTunnel").onclick=()=>{const s=tunnel.status;send({type:(s==="up"||s==="starting")?"stopTunnel":"startTunnel"})};
+$("btnCopy").onclick=()=>{if(tunnel.full){navigator.clipboard.writeText(tunnel.full);$("btnCopy").textContent="✓ 已复制";setTimeout(()=>$("btnCopy").textContent="📋 复制链接",1200)}};
+$("btnPreview").onclick=()=>{const u=tunnel.full||(location.origin+"/?token="+new URLSearchParams(location.search).get("token"));window.open(tunnel.full||u,"_blank")};
+$("model").onchange=e=>send({type:"setModel",model:e.target.value});
+$("effort").onchange=e=>send({type:"setEffort",effort:e.target.value});
+$("autoToggle").onclick=()=>{const on=!$("autoToggle").classList.contains("on");setAuto(on);send({type:"setAuto",value:on})};
+$("btnCwd").onclick=()=>{const p=$("cwdInput").value.trim();if(p){send({type:"setCwd",path:p});$("cwdCur").textContent=p}};
+
+// 文件夹选择器
+$("btnBrowse").onclick=()=>{$("picker").classList.remove("hidden");reqDir($("cwdCur").textContent&&$("cwdCur").textContent!=="—"?$("cwdCur").textContent:"drives")};
+$("pkClose").onclick=()=>$("picker").classList.add("hidden");
+$("pkUp").onclick=()=>{if(pkParent)reqDir(pkParent)};
+$("pkPick").onclick=()=>{if(pkCur&&pkCur!=="drives"){send({type:"setCwd",path:pkCur});$("cwdCur").textContent=pkCur;$("cwdInput").value=pkCur;$("picker").classList.add("hidden")}};
+$("pkMkdir").onclick=()=>{if(pkCur&&pkCur!=="drives"){const n=prompt("新文件夹名字：");if(n&&n.trim())send({type:"mkdir",path:pkCur,name:n.trim()})}};
+function reqDir(p){$("pkList").innerHTML='<div style="padding:16px;color:#888">加载中…</div>';send({type:"listDir",path:p})}
+function renderPicker(m){
+  pkCur=m.path;pkParent=m.parent;
+  $("pkPath").textContent=m.isDrives?"选择磁盘":m.path;
+  $("pkUp").style.visibility=m.parent?"visible":"hidden";
+  $("pkPick").style.display=m.isDrives?"none":"";$("pkMkdir").style.display=m.isDrives?"none":"";
+  const list=$("pkList");list.innerHTML="";
+  if(!m.entries||!m.entries.length){list.innerHTML='<div style="padding:16px;color:#888">（空）</div>';return}
+  for(const e of m.entries){
+    const row=document.createElement("div");row.className="pi "+(e.isDir?"dir":"file");
+    row.innerHTML='<span>'+(e.isDir?"📁":"📄")+'</span><span>'+e.name.replace(/</g,"&lt;")+'</span>';
+    if(e.isDir)row.onclick=()=>reqDir(e.path);
+    list.appendChild(row);
+  }
+}
+
+connect();
+setInterval(()=>{if(connected)send({type:"ping"})},25000);
+</script>
+</body>
+</html>

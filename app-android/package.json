@@ -1,0 +1,13 @@
+{
+  "name": "claude-remote-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "把「手机遥控 Claude Code」网页打包成安卓 APK（Capacitor）",
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}
