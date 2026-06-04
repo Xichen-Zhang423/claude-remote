@@ -1,10 +1,14 @@
 "use strict";
 
+// 界面版本号：手机上打开 ⚙ 设置能看到，用来确认是不是已经更新到最新代码
+const APP_VERSION = "v2.1（实时画面）";
+console.log("Claude Remote UI", APP_VERSION);
+
 // ---------- 取出/保存连接信息 ----------
 const params = new URLSearchParams(location.search);
 if (params.get("token")) {
-  // 浏览器扫码进来：当前页面源就是后端
-  const b = { host: location.host, token: params.get("token"), secure: location.protocol === "https:" };
+  // 浏览器扫码进来：当前页面源就是后端；rz 是云端中转地址（免扫码用）
+  const b = { host: location.host, token: params.get("token"), secure: location.protocol === "https:", rz: params.get("rz") || "" };
   localStorage.setItem("backend", JSON.stringify(b));
   localStorage.setItem("token", params.get("token"));
   history.replaceState(null, "", location.pathname);
@@ -20,7 +24,8 @@ function setBackendFromText(str) {
   const u = new URL(str.trim());
   const token = u.searchParams.get("token");
   if (!token) throw new Error("二维码里没有 token");
-  const b = { host: u.host, token, secure: u.protocol === "https:" };
+  const rz = u.searchParams.get("rz") || "";
+  const b = { host: u.host, token, secure: u.protocol === "https:", rz };
   localStorage.setItem("backend", JSON.stringify(b));
   localStorage.setItem("token", token);
   return b;
@@ -45,6 +50,7 @@ let connected = false;
 let busy = false;
 let reconnectTimer = null;
 let curAssistant = null;          // 当前正在累积的 assistant 气泡
+let curThinking = null;           // 当前正在累积的思考气泡（流式用）
 const toolEls = new Map();        // tool_use_id -> 卡片元素
 let currentCwd = "";              // 当前工作目录
 let browseCur = "";               // 浏览器当前所在路径
@@ -149,6 +155,21 @@ function appendAssistant(el, text) {
   bindCodeCopy(el);
   scrollToBottom();
 }
+// 流式：逐字累积，用 rAF 合并渲染，避免每个字都重排
+function appendStreamRaw(el, text) {
+  el._raw = (el._raw || "") + text;
+  if (!el._rs) {
+    el._rs = true;
+    requestAnimationFrame(() => { el._rs = false; el.innerHTML = mdToHtml(el._raw); bindCodeCopy(el); scrollToBottom(); });
+  }
+}
+function appendThinkRaw(el, text) {
+  el._raw = (el._raw || "") + text;
+  if (!el._rs) {
+    el._rs = true;
+    requestAnimationFrame(() => { el._rs = false; el.textContent = "💭 " + el._raw; scrollToBottom(); });
+  }
+}
 // 用户气泡：文字 + 图片缩略图
 function addUser(text, images) {
   const div = document.createElement("div");
@@ -194,7 +215,7 @@ function toolIcon(name) {
 }
 
 function addToolCard(id, name, input) {
-  curAssistant = null;
+  curAssistant = null; curThinking = null;
   const card = document.createElement("div");
   card.className = "tool";
   const head = document.createElement("div");
@@ -227,7 +248,37 @@ function prettyInput(name, input) {
   try { return JSON.stringify(input, null, 2); } catch { return String(input); }
 }
 
+// TodoWrite 渲染成漂亮的勾选清单
+const todoToolIds = new Set();
+function addTodoCard(id, todos) {
+  curAssistant = null; curThinking = null;
+  if (id) todoToolIds.add(id);
+  if (!Array.isArray(todos)) todos = [];
+  const card = document.createElement("div");
+  card.className = "todo-card";
+  const done = todos.filter((t) => t.status === "completed").length;
+  const head = document.createElement("div");
+  head.className = "todo-head";
+  head.textContent = `📋 任务清单 ${done}/${todos.length}`;
+  card.appendChild(head);
+  for (const t of todos) {
+    const row = document.createElement("div");
+    row.className = "todo-row " + (t.status || "pending");
+    const ic = { completed: "✓", in_progress: "▸", pending: "○" }[t.status] || "○";
+    const span1 = document.createElement("span"); span1.className = "todo-ic"; span1.textContent = ic;
+    const span2 = document.createElement("span"); span2.className = "todo-txt";
+    span2.textContent = (t.status === "in_progress" && t.activeForm) ? t.activeForm : (t.content || "");
+    row.appendChild(span1); row.appendChild(span2);
+    card.appendChild(row);
+  }
+  messagesEl.appendChild(card);
+  updateEmptyState();
+  scrollToBottom();
+  return card;
+}
+
 function addToolResult(id, content, isError) {
+  if (todoToolIds.has(id) && !isError) return; // TodoWrite 的结果是噪音，已用清单卡呈现
   const card = toolEls.get(id);
   const target = card ? card.querySelector(".tool-body") : null;
   if (target) {
@@ -247,13 +298,13 @@ function addToolResult(id, content, isError) {
 // 重连/刷新后回放历史对话
 function replayHistory(events) {
   messagesEl.innerHTML = ""; if (emptyState) messagesEl.appendChild(emptyState);
-  curAssistant = null; toolEls.clear();
+  curAssistant = null; curThinking = null; toolEls.clear();
   for (const m of events) {
     switch (m.type) {
       case "user_echo": addUser(m.text, m.images); curAssistant = null; break;
       case "assistant": curAssistant = addAssistant(m.text); break;
       case "thinking": addMsg("thinking", "💭 " + m.text); curAssistant = null; break;
-      case "tool_use": addToolCard(m.id, m.name, m.input); break;
+      case "tool_use": if (m.name === "TodoWrite") addTodoCard(m.id, m.input && m.input.todos); else addToolCard(m.id, m.name, m.input); break;
       case "tool_result": addToolResult(m.toolUseId, m.content, m.isError); break;
       case "result": curAssistant = null; if (m.isError) addMsg("error", "✕ " + (m.result || "出错了")); break;
     }
@@ -274,6 +325,16 @@ function notify(title, body) {
   } catch {}
 }
 
+// ---------- 浮层提示 ----------
+function toast(text, ms = 2000) {
+  let t = document.getElementById("toast");
+  if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "toast"; document.body.appendChild(t); }
+  t.textContent = text;
+  t.classList.add("show");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("show"), ms);
+}
+
 // ---------- 连接状态 ----------
 function setDot(state) { dot.className = "dot " + state; }
 function setBusy(b) {
@@ -284,27 +345,62 @@ function setBusy(b) {
 
 // ---------- WebSocket ----------
 let lastPong = 0;
-function connect(force) {
-  const b = getBackend();
+let connectLock = false;
+// 有云端中转(rz)就先去问"当前网址"，再连过去；问不到就用上次存的
+async function resolveHost(b) {
+  if (!b.rz) return b;
+  try {
+    let rzUrl = b.rz;
+    if (!/^https?:\/\//i.test(rzUrl)) rzUrl = "https://" + rzUrl; // 容错：补全 https://
+    // 关键：加超时，否则国内网络一卡 fetch 永远挂着，会把重连锁死
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 6000);
+    let r;
+    try { r = await fetch(rzUrl, { cache: "no-store", signal: ctrl.signal }); }
+    finally { clearTimeout(to); }
+    const j = await r.json();
+    if (j && j.url) {
+      const u = new URL(j.url);
+      const nb = { host: u.host, token: b.token, secure: u.protocol === "https:", rz: b.rz };
+      localStorage.setItem("backend", JSON.stringify(nb)); // 记住，下次中转挂了也能用上次的
+      return nb;
+    }
+  } catch {}
+  return b;
+}
+async function connect(force) {
+  let b = getBackend();
   if (!b) { addMsg("system", "还没连接。点右上角 ⛶ 扫一下电脑「控制台」上的二维码即可。"); return; }
   // 已经在连或已连上就不重复建连（除非强制）
   if (!force && ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
-  if (ws) { try { ws.onclose = null; ws.close(); } catch {} ws = null; }
-  const proto = b.secure ? "wss" : "ws";
-  try { ws = new WebSocket(`${proto}://${b.host}/ws?token=${encodeURIComponent(b.token)}`); }
-  catch (e) { addMsg("error", "连接失败: " + e.message); scheduleReconnect(); return; }
-
-  ws.onopen = () => { connected = true; lastPong = Date.now(); setDot(busy ? "busy" : "online"); clearTimeout(reconnectTimer); };
-  ws.onclose = (e) => {
-    connected = false; setDot("offline");
-    if (e.code === 4001) { addMsg("error", "Token 错误，连接被拒绝。点 ⚙ 检查 Token。"); return; }
-    scheduleReconnect();
-  };
-  ws.onerror = () => {};
-  ws.onmessage = (ev) => {
-    let m; try { m = JSON.parse(ev.data); } catch { return; }
-    handle(m);
-  };
+  if (connectLock) return;
+  connectLock = true;
+  try {
+    b = await resolveHost(b);
+    if (ws) { try { ws.onclose = null; ws.close(); } catch {} ws = null; }
+    const proto = b.secure ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${b.host}/ws?token=${encodeURIComponent(b.token)}`);
+    ws.onopen = () => {
+      const wasOffline = !connected;
+      connected = true; lastPong = Date.now(); setDot(busy ? "busy" : "online"); clearTimeout(reconnectTimer);
+      if (wasOffline && !document.hidden) toast("✓ 已连接电脑");
+      if (typeof liveActive !== "undefined" && liveActive) requestScreenshot();  // 重连后接着抓
+    };
+    ws.onclose = (e) => {
+      connected = false; setDot("offline");
+      if (e.code === 4001) { addMsg("error", "Token 错误，连接被拒绝。点 ⚙ 检查 Token。"); return; }
+      scheduleReconnect();
+    };
+    ws.onerror = () => {};
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      handle(m);
+    };
+  } catch (e) {
+    addMsg("error", "连接失败: " + ((e && e.message) || e)); scheduleReconnect();
+  } finally {
+    connectLock = false;
+  }
 }
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
@@ -323,7 +419,9 @@ function send(obj) {
 }
 
 // ---------- 处理服务器消息 ----------
+const HIDE_TYPING_ON = new Set(["assistant", "assistant_delta", "thinking", "thinking_delta", "tool_use", "tool_result", "result", "session_ended", "interrupted", "error", "cleared", "history"]);
 function handle(m) {
+  if (HIDE_TYPING_ON.has(m.type)) hideTyping();
   switch (m.type) {
     case "hello":
       autoToggle.checked = !!m.autoApprove;
@@ -355,7 +453,7 @@ function handle(m) {
       break;
     case "cleared":
       messagesEl.innerHTML = ""; if (emptyState) messagesEl.appendChild(emptyState);
-      curAssistant = null; toolEls.clear(); updateEmptyState();
+      curAssistant = null; curThinking = null; toolEls.clear(); updateEmptyState();
       break;
     case "user_echo":
       // 已在本地回显，忽略来自其它设备的也行；这里跳过避免重复
@@ -365,12 +463,25 @@ function handle(m) {
       else appendAssistant(curAssistant, m.text);
       setBusy(true);
       break;
-    case "thinking":
+    case "assistant_delta":
+      curThinking = null;
+      if (!curAssistant) curAssistant = addAssistant("");
+      appendStreamRaw(curAssistant, m.text);
+      setBusy(true);
+      break;
+    case "thinking_delta":
       curAssistant = null;
+      if (!curThinking) { curThinking = addMsg("thinking", "💭 "); curThinking._raw = ""; }
+      appendThinkRaw(curThinking, m.text);
+      setBusy(true);
+      break;
+    case "thinking":
+      curAssistant = null; curThinking = null;
       addMsg("thinking", "💭 " + m.text);
       break;
     case "tool_use":
-      addToolCard(m.id, m.name, m.input);
+      if (m.name === "TodoWrite") addTodoCard(m.id, m.input && m.input.todos);
+      else addToolCard(m.id, m.name, m.input);
       setBusy(true);
       break;
     case "tool_result":
@@ -384,7 +495,7 @@ function handle(m) {
       closePermission(m.id);
       break;
     case "result":
-      curAssistant = null;
+      curAssistant = null; curThinking = null;
       setBusy(false);
       if (m.isError) { addMsg("error", "✕ " + (m.result || "出错了")); notify("Claude 出错了", m.result || ""); }
       else {
@@ -412,7 +523,7 @@ function handle(m) {
       setBusy(false);
       break;
     case "interrupted":
-      curAssistant = null;
+      curAssistant = null; curThinking = null;
       addMsg("system", "⏹ 已停止");
       setBusy(false);
       break;
@@ -421,6 +532,23 @@ function handle(m) {
       break;
     case "notice":
       addMsg("system", m.message || "");
+      break;
+    case "screenshot":
+      lastShot = m.data;
+      $("screenImg").src = m.data;
+      $("screenImg").style.display = "block";
+      $("screenHint").style.display = "none";
+      if (!liveActive) $("screenShot").textContent = "📸 刷新";
+      // 如果全屏控制正开着，也更新图片
+      if (!$("ctrlOverlay").classList.contains("hidden")) $("ctrlImg").src = m.data;
+      // 实时模式：这张到了就立刻请求下一张（视图还开着才继续）
+      if (liveActive && screenViewOpen()) setTimeout(requestScreenshot, 110);
+      else if (liveActive) liveActive = false; // 视图都关了，停
+      break;
+    case "screenshotError":
+      $("screenHint").textContent = "截屏失败：" + (m.message || "");
+      $("screenHint").style.display = "";
+      $("screenShot").textContent = "📸 刷新";
       break;
     case "error":
       addMsg("error", m.message || "未知错误");
@@ -467,7 +595,8 @@ function sendPrompt(presetText) {
   if (!connected) { addMsg("error", "尚未连接，请稍候或检查设置。"); return; }
   stickToBottom = true;
   addUser(text, images);
-  curAssistant = null;
+  curAssistant = null; curThinking = null;
+  showTyping();
   send({ type: "prompt", text, images });
   if (presetText == null) { inputEl.value = ""; autoResize(); }
   clearAttachments();
@@ -523,6 +652,30 @@ function renderAttachments() {
 }
 function clearAttachments() { pendingImages = []; renderAttachments(); }
 
+// ---------- 语音输入（浏览器自带语音识别）----------
+const micBtn = $("micBtn");
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog = null, recognizing = false;
+if (!SpeechRec) { if (micBtn) micBtn.style.display = "none"; }
+else if (micBtn) {
+  micBtn.onclick = () => {
+    if (recognizing) { try { recog && recog.stop(); } catch {} return; }
+    recog = new SpeechRec();
+    recog.lang = "zh-CN"; recog.interimResults = true; recog.continuous = false;
+    const base = inputEl.value;
+    recog.onstart = () => { recognizing = true; micBtn.classList.add("listening"); };
+    recog.onend = () => { recognizing = false; micBtn.classList.remove("listening"); };
+    recog.onerror = (e) => { recognizing = false; micBtn.classList.remove("listening"); if (e.error === "not-allowed") addMsg("system", "麦克风没授权，无法语音输入"); };
+    recog.onresult = (e) => {
+      let txt = "";
+      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+      inputEl.value = (base ? base + " " : "") + txt;
+      autoResize();
+    };
+    try { recog.start(); } catch {}
+  };
+}
+
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendPrompt(); }
 });
@@ -547,10 +700,13 @@ async function startScan() {
   }
   const tick = () => {
     if (video.readyState === video.HAVE_ENOUGH_DATA && typeof jsQR === "function") {
-      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(img.data, img.width, img.height);
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const scale = Math.min(1, 640 / Math.max(vw, vh)); // 缩到最长边 640，识别快很多
+      const w = Math.max(1, Math.round(vw * scale)), h = Math.max(1, Math.round(vh * scale));
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(video, 0, 0, w, h);
+      const img = ctx.getImageData(0, 0, w, h);
+      const code = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
       if (code && code.data) { onScan(code.data); return; }
     }
     scanRAF = requestAnimationFrame(tick);
@@ -566,9 +722,11 @@ function onScan(text) {
   try {
     setBackendFromText(text);
     stopScan();
+    $("settingsModal").classList.add("hidden");
     addMsg("system", "已扫码，正在连接…");
-    if (ws) try { ws.close(); } catch {}
-    connect();
+    if (ws) try { ws.onclose = null; ws.close(); } catch {}
+    ws = null; connected = false;
+    connect(true);
   } catch (e) { $("scanHint").textContent = "二维码无效：" + e.message; }
 }
 $("scanBtn").onclick = showScan;
@@ -593,7 +751,7 @@ $("settingsBtn").onclick = () => {
   const b = getBackend();
   $("serverInput").value = b ? b.host : "";
   $("tokenInput").value = b ? b.token : "";
-  $("connInfo").textContent = `当前后端: ${b ? (b.secure ? "https" : "http") + "://" + b.host : "未连接"} ｜ ${navigator.onLine ? "网络正常" : "离线"}`;
+  $("connInfo").textContent = `当前后端: ${b ? (b.secure ? "https" : "http") + "://" + b.host : "未连接"} ｜ ${navigator.onLine ? "网络正常" : "离线"} ｜ 界面 ${APP_VERSION}`;
   $("quickEdit").value = quickToText(loadQuick());
   notifyToggle.checked = notifyEnabled();
   refreshNotifyStatus();
@@ -655,7 +813,7 @@ function renderDirList(m) {
     list.appendChild(row);
   }
 }
-$("folderBtn").onclick = openBrowser;
+const _folderBtn = $("folderBtn"); if (_folderBtn) _folderBtn.onclick = openBrowser;
 $("cwdBar").onclick = openBrowser;
 $("browserClose").onclick = () => $("browserModal").classList.add("hidden");
 $("browserUp").onclick = () => { if (browseParent) requestDir(browseParent); };
@@ -762,23 +920,28 @@ function fmtTime(ts) {
   if (d.toDateString() === y.toDateString()) return "昨天 " + hm;
   return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
+let convFilter = "";
 function renderConvList() {
   const list = $("convList");
   if (!list) return;
   list.innerHTML = "";
+  const f = convFilter.trim().toLowerCase();
+  const items = f ? convCache.filter((c) => (c.title || "").toLowerCase().includes(f) || (c.cwd || "").toLowerCase().includes(f)) : convCache;
   if (!convCache.length) { list.innerHTML = '<div class="browser-empty">还没有历史对话</div>'; return; }
-  for (const c of convCache) {
+  if (!items.length) { list.innerHTML = '<div class="browser-empty">没有匹配的对话</div>'; return; }
+  for (const c of items) {
     const row = document.createElement("div");
     row.className = "conv-item" + (c.id === curConvId ? " active" : "");
     const main = document.createElement("div");
     main.className = "conv-main";
-    main.innerHTML = `<div class="conv-title"></div><div class="conv-sub"></div>`;
+    main.innerHTML = `<div class="conv-title"></div><div class="conv-sub"></div><div class="conv-path"></div>`;
     main.querySelector(".conv-title").textContent = c.title || "未命名对话";
     main.querySelector(".conv-sub").textContent = fmtTime(c.updatedAt) + (c.id === curConvId ? " · 当前" : "");
+    main.querySelector(".conv-path").textContent = c.cwd ? "📂 " + c.cwd : "";
     main.addEventListener("click", () => {
       if (c.id === curConvId) { $("historyModal").classList.add("hidden"); return; }
       send({ type: "loadConversation", id: c.id });
-      addMsg("system", "正在载入对话：" + (c.title || ""));
+      addMsg("system", "正在载入：" + (c.title || "") + (c.cwd ? "\n📂 " + c.cwd : ""));
       $("historyModal").classList.add("hidden");
     });
     const ren = document.createElement("button");
@@ -803,6 +966,7 @@ $("historyBtn").onclick = () => {
   renderConvList();
   $("historyModal").classList.remove("hidden");
 };
+$("convSearch").addEventListener("input", (e) => { convFilter = e.target.value || ""; renderConvList(); });
 $("historyClose").onclick = () => $("historyModal").classList.add("hidden");
 $("newConvBtn").onclick = () => {
   send({ type: "newConversation" });
@@ -810,14 +974,246 @@ $("newConvBtn").onclick = () => {
   $("historyModal").classList.add("hidden");
 };
 
-// ---------- 顶栏下方的工作目录条 ----------
+// ---------- 对话内消息搜索 ----------
+let searchHits = [], searchIdx = -1;
+function clearSearchHits() {
+  for (const el of searchHits) el.classList.remove("search-hit", "search-current");
+  searchHits = []; searchIdx = -1;
+}
+function markCurrent() {
+  searchHits.forEach((el, i) => el.classList.toggle("search-current", i === searchIdx));
+  const el = searchHits[searchIdx];
+  if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  $("searchCount").textContent = (searchHits.length ? searchIdx + 1 : 0) + "/" + searchHits.length;
+}
+function runSearch() {
+  clearSearchHits();
+  const q = $("msgSearch").value.trim().toLowerCase();
+  if (!q) { $("searchCount").textContent = "0/0"; return; }
+  searchHits = Array.from(messagesEl.children).filter((c) => c !== emptyState && (c.textContent || "").toLowerCase().includes(q));
+  searchHits.forEach((el) => el.classList.add("search-hit"));
+  searchIdx = searchHits.length ? 0 : -1;
+  markCurrent();
+}
+function gotoHit(d) {
+  if (!searchHits.length) return;
+  searchIdx = (searchIdx + d + searchHits.length) % searchHits.length;
+  markCurrent();
+}
+function openSearch() { $("searchBar").classList.remove("hidden"); const i = $("msgSearch"); i.value = ""; i.focus(); }
+function closeSearch() { $("searchBar").classList.add("hidden"); clearSearchHits(); }
+$("searchBtn").onclick = () => { if ($("searchBar").classList.contains("hidden")) openSearch(); else closeSearch(); };
+$("msgSearch").addEventListener("input", runSearch);
+$("msgSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); gotoHit(e.shiftKey ? -1 : 1); } });
+$("searchPrev").onclick = () => gotoHit(-1);
+$("searchNext").onclick = () => gotoHit(1);
+$("searchClose").onclick = closeSearch;
+
+// ---------- 顶栏下方的工作目录条（显示完整路径，点开可换目录）----------
 function updateCwdBar() {
   const bar = $("cwdBar");
   if (!bar) return;
-  const short = currentCwd ? currentCwd.replace(/^.*[\\/]/, "") || currentCwd : "";
-  bar.textContent = short ? "📂 " + short : "";
-  bar.classList.toggle("hidden", !short);
+  bar.textContent = currentCwd ? "📂 " + currentCwd : "";
+  bar.classList.toggle("hidden", !currentCwd);
   bar.title = currentCwd;
+}
+
+// ---------- “正在思考”指示器 ----------
+function showTyping() {
+  if (document.getElementById("typingMsg")) return;
+  const d = document.createElement("div");
+  d.id = "typingMsg"; d.className = "msg assistant typing";
+  d.innerHTML = '<span class="ti-label">Claude 正在思考</span><span class="ti-dots"><i></i><i></i><i></i></span>';
+  messagesEl.appendChild(d); updateEmptyState(); scrollToBottom();
+}
+function hideTyping() { const d = document.getElementById("typingMsg"); if (d) d.remove(); }
+
+// ---------- 刷新：已连接则刷新聊天内容，断开则强制重连 ----------
+$("refreshBtn").onclick = () => {
+  if (connected && ws && ws.readyState === WebSocket.OPEN) {
+    send({ type: "refreshHistory" });
+    toast("已刷新聊天");
+  } else {
+    toast("正在重新连接…");
+    if (ws) { try { ws.onclose = null; ws.close(); } catch {} ws = null; }
+    connected = false; setDot("offline");
+    connect(true);
+  }
+};
+
+// ---------- 看电脑屏幕 + 远程控制 ----------
+let screenTimer = null;
+let lastShot = "";
+// 实时画面：抓完一张立刻抓下一张（连环单张）。用的是杀软不拦的 screenshot.ps1，
+// 不开持续抓屏的长驻进程（那个会被火绒判恶意、还会触发游戏反作弊）。
+let liveActive = false;
+function requestScreenshot() {
+  if (!connected) { $("screenHint").textContent = "未连接，无法获取屏幕"; $("screenHint").style.display = ""; return; }
+  if (!liveActive) $("screenShot").textContent = "获取中…";
+  send({ type: "screenshot" });
+}
+function screenViewOpen() {
+  return !$("ctrlOverlay").classList.contains("hidden") || !$("screenModal").classList.contains("hidden");
+}
+function liveOn() { if (!liveActive) { liveActive = true; requestScreenshot(); } }
+function liveOff() { liveActive = false; }
+function stopScreenAuto() { if (screenTimer) { clearInterval(screenTimer); screenTimer = null; } }
+$("screenBtn").onclick = () => { $("screenModal").classList.remove("hidden"); requestScreenshot(); };
+$("screenClose").onclick = () => { $("screenModal").classList.add("hidden"); stopScreenAuto(); liveOff(); $("screenAuto").checked = false; };
+$("screenShot").onclick = requestScreenshot;
+$("screenAuto").addEventListener("change", (e) => {
+  if (e.target.checked) liveOn();   // 勾「自动」= 实时画面（连环抓单张）
+  else liveOff();
+});
+
+// ===== 全屏控制模式：手机屏幕＝电脑屏幕 =====
+const ctrlStage = $("ctrlStage");
+let ctrlRot = 0;            // 0=正放（横屏手机）/ 90=旋转铺满（竖屏手机）
+let ctrlZoom = 1, ctrlTx = 0, ctrlTy = 0;
+let ctrlNatW = 16, ctrlNatH = 9;   // 桌面截图原始尺寸
+let lastCtrlPt = null;             // 最近一次点击的桌面坐标（双击/右键按钮用）
+
+function applyCtrlPan() { $("ctrlPan").style.transform = `translate(${ctrlTx}px, ${ctrlTy}px) scale(${ctrlZoom})`; }
+
+// 按手机方向把桌面图旋转/缩放到“铺满”，且让图片元素尺寸 = 实际可见尺寸（无留白），坐标才点对点
+function layoutCtrlImg() {
+  if (!ctrlStage) return;
+  const img = $("ctrlImg");
+  if (img.naturalWidth) { ctrlNatW = img.naturalWidth; ctrlNatH = img.naturalHeight; }
+  const VW = ctrlStage.clientWidth, VH = ctrlStage.clientHeight;
+  const W = ctrlNatW, H = ctrlNatH;
+  ctrlRot = (VW >= VH) ? 0 : 90;   // 横屏正放，竖屏旋转铺满
+  let cssW, cssH;
+  if (ctrlRot === 0) {
+    const s = Math.min(VW / W, VH / H); cssW = W * s; cssH = H * s;
+  } else {
+    const onW = Math.min(VW, VH * H / W); const onH = onW * W / H; cssW = onH; cssH = onW;
+  }
+  img.style.width = cssW + "px";
+  img.style.height = cssH + "px";
+  img.style.transform = `rotate(${ctrlRot}deg)`;
+}
+// 实时画面下每帧都会换 src，只在画面尺寸真的变了时才重新布局，避免每帧重排
+let ctrlLaidW = 0, ctrlLaidH = 0;
+$("ctrlImg").addEventListener("load", () => {
+  const img = $("ctrlImg");
+  if (img.naturalWidth && (img.naturalWidth !== ctrlLaidW || img.naturalHeight !== ctrlLaidH)) {
+    ctrlLaidW = img.naturalWidth; ctrlLaidH = img.naturalHeight;
+    layoutCtrlImg();
+  }
+});
+window.addEventListener("resize", () => { if (!$("ctrlOverlay").classList.contains("hidden")) layoutCtrlImg(); });
+window.addEventListener("orientationchange", () => { if (!$("ctrlOverlay").classList.contains("hidden")) setTimeout(layoutCtrlImg, 250); });
+
+// 屏幕坐标 → 桌面 0-1 坐标。getBoundingClientRect 在 90°旋转+缩放+平移下仍是“可见图实际矩形”，所以始终准确
+function ctrlMap(px, py) {
+  const r = $("ctrlImg").getBoundingClientRect();
+  let u = (px - r.left) / r.width, v = (py - r.top) / r.height;
+  u = Math.max(0, Math.min(1, u)); v = Math.max(0, Math.min(1, v));
+  return ctrlRot === 90 ? { rx: v, ry: 1 - u } : { rx: u, ry: v };  // rotate(90deg) 的逆映射
+}
+function ctrlDo(px, py, action) {
+  const c = ctrlMap(px, py);
+  lastCtrlPt = c;
+  send({ type: "control", action, rx: c.rx, ry: c.ry });
+  const rip = $("ctrlRipple");
+  rip.style.left = px + "px"; rip.style.top = py + "px";
+  rip.classList.remove("pop"); void rip.offsetWidth; rip.classList.add("pop");
+  if (!liveActive) setTimeout(requestScreenshot, 450);  // 实时模式下结果会自动刷出来
+}
+
+// 手势：单指轻点=单击，长按=右键，单指拖动(放大后)=平移，双指=缩放
+let gStart = null, gMode = null, gMoved = false, lpTimer = null, pinchD0 = 0, z0 = 1, tx0 = 0, ty0 = 0;
+function tp(t) { return { x: t.clientX, y: t.clientY }; }
+function tdist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+if (ctrlStage) {
+  ctrlStage.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 1) {
+      gStart = tp(e.touches[0]); gStart.t = Date.now(); gMoved = false; gMode = "tap";
+      clearTimeout(lpTimer);
+      lpTimer = setTimeout(() => { if (gMode === "tap" && !gMoved) { gMode = "done"; ctrlDo(gStart.x, gStart.y, "rclick"); } }, 500);
+    } else if (e.touches.length === 2) {
+      clearTimeout(lpTimer); gMode = "pinch";
+      pinchD0 = tdist(tp(e.touches[0]), tp(e.touches[1])); z0 = ctrlZoom; tx0 = ctrlTx; ty0 = ctrlTy;
+    }
+    e.preventDefault();
+  }, { passive: false });
+  ctrlStage.addEventListener("touchmove", (e) => {
+    if (gMode === "pinch" && e.touches.length === 2) {
+      const d = tdist(tp(e.touches[0]), tp(e.touches[1]));
+      ctrlZoom = Math.max(1, Math.min(5, z0 * d / (pinchD0 || 1)));
+      applyCtrlPan();
+    } else if (e.touches.length === 1 && (gMode === "tap" || gMode === "pan")) {
+      const p = tp(e.touches[0]);
+      if (!gMoved && Math.hypot(p.x - gStart.x, p.y - gStart.y) > 12) {
+        gMoved = true; clearTimeout(lpTimer);
+        if (ctrlZoom > 1) { gMode = "pan"; tx0 = ctrlTx; ty0 = ctrlTy; gStart = p; }
+      }
+      if (gMode === "pan") { ctrlTx = tx0 + (p.x - gStart.x); ctrlTy = ty0 + (p.y - gStart.y); applyCtrlPan(); }
+    }
+    e.preventDefault();
+  }, { passive: false });
+  ctrlStage.addEventListener("touchend", (e) => {
+    clearTimeout(lpTimer);
+    if (gMode === "tap" && !gMoved && Date.now() - gStart.t < 500) ctrlDo(gStart.x, gStart.y, "click");
+    if (e.touches.length === 0) {
+      gMode = null;
+      if (ctrlZoom <= 1.02) { ctrlZoom = 1; ctrlTx = 0; ctrlTy = 0; applyCtrlPan(); }  // 缩回原大小就归位
+    }
+  }, { passive: false });
+}
+
+// 侧边功能键抽屉
+$("ctrlHandle").onclick = () => $("ctrlDrawer").classList.add("open");
+$("ctrlDrawerClose").onclick = () => $("ctrlDrawer").classList.remove("open");
+$("ctrlDrawer").querySelectorAll(".kbtn").forEach((b) => {
+  b.addEventListener("click", () => {
+    if (b.dataset.combo) send({ type: "control", action: "combo", text: b.dataset.combo });
+    else if (b.dataset.act) {
+      if (!lastCtrlPt) { toast("先在屏幕上点一下确定位置"); return; }
+      send({ type: "control", action: b.dataset.act, rx: lastCtrlPt.rx, ry: lastCtrlPt.ry });
+    } else if (b.dataset.key != null) {
+      send({ type: "control", action: "key", text: b.dataset.key });
+    }
+    if (!liveActive) setTimeout(requestScreenshot, 450);
+  });
+});
+$("ctrlSend").onclick = () => {
+  const t = $("ctrlText").value;
+  if (!t) return;
+  send({ type: "control", action: "type", text: t });
+  $("ctrlText").value = ""; toast("已输入"); if (!liveActive) setTimeout(requestScreenshot, 500);
+};
+
+$("screenCtrlBtn").onclick = openControlOverlay;
+$("ctrlExit").onclick = exitControlOverlay;
+$("ctrlRefresh").onclick = () => { requestScreenshot(); toast("刷新中…"); };
+
+function openControlOverlay() {
+  if (lastShot) $("ctrlImg").src = lastShot; else toast("正在获取屏幕…");
+  ctrlZoom = 1; ctrlTx = 0; ctrlTy = 0; applyCtrlPan();
+  $("ctrlDrawer").classList.remove("open");
+  $("ctrlOverlay").classList.remove("hidden");
+  $("screenModal").classList.add("hidden");
+  // 尽量全屏 + 锁横屏（成功则桌面正放铺满；失败就用竖屏旋转铺满兜底）
+  const ov = $("ctrlOverlay");
+  try { (ov.requestFullscreen || ov.webkitRequestFullscreen || function () {}).call(ov); } catch {}
+  try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {}); } catch {}
+  ctrlLaidW = 0; ctrlLaidH = 0;        // 进入后强制重新布局一次
+  requestAnimationFrame(layoutCtrlImg);
+  stopScreenAuto();
+  requestScreenshot();                  // 先来一张垫着
+  liveOn();                             // 然后开实时画面
+}
+function exitControlOverlay() {
+  $("ctrlOverlay").classList.add("hidden");
+  $("ctrlDrawer").classList.remove("open");
+  stopScreenAuto();
+  if (!$("screenAuto").checked) liveOff();   // 小窗没勾自动就停掉实时画面
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch {}
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch {}
+  $("screenModal").classList.remove("hidden");
+  requestScreenshot();
 }
 
 // ---------- 点弹窗外的暗色区域即关闭 ----------
@@ -825,6 +1221,7 @@ document.querySelectorAll(".modal").forEach((modal) => {
   modal.addEventListener("click", (e) => {
     if (e.target !== modal) return; // 只在点到背景（而非卡片内部）时关闭
     if (modal.id === "scanModal") { stopScan(); return; }
+    if (modal.id === "screenModal") { stopScreenAuto(); }
     if (modal.id === "permModal") return; // 权限弹窗必须明确选择，不许点背景误关
     modal.classList.add("hidden");
   });
@@ -851,5 +1248,10 @@ setInterval(() => {
 
 // Service Worker（用于网页版安装到主屏幕）；APK(Capacitor) 里资源本就在本地，跳过避免缓存旧界面
 if (!window.Capacitor && "serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  navigator.serviceWorker.register("sw.js").then((reg) => { try { reg.update(); } catch {} }).catch(() => {});
+  // 新版本就绪后自动整页刷新一次，确保手机拿到最新代码（不用手动清缓存）
+  let swRefreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (swRefreshing) return; swRefreshing = true; location.reload();
+  });
 }

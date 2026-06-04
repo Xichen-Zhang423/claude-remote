@@ -20,9 +20,10 @@
       <span class="title">Claude Code</span>
     </div>
     <div class="top-actions">
+      <button id="refreshBtn" class="icon-btn" aria-label="刷新重连">🔄</button>
       <button id="historyBtn" class="icon-btn" aria-label="聊天记录">🕘</button>
-      <button id="scanBtn" class="icon-btn" aria-label="扫码连接">⛶</button>
-      <button id="folderBtn" class="icon-btn" aria-label="工作目录">📁</button>
+      <button id="searchBtn" class="icon-btn" aria-label="在对话内搜索">🔍</button>
+      <button id="screenBtn" class="icon-btn" aria-label="看电脑屏幕">🖥️</button>
       <label class="auto-toggle" title="全自动放行">
         <input type="checkbox" id="autoToggle" />
         <span class="switch"></span>
@@ -31,6 +32,14 @@
       <button id="settingsBtn" class="icon-btn" aria-label="设置">⚙</button>
     </div>
   </header>
+
+  <div id="searchBar" class="search-bar hidden">
+    <input id="msgSearch" class="search-input" placeholder="在本对话里查找…" />
+    <span id="searchCount" class="search-count">0/0</span>
+    <button id="searchPrev" class="search-nav" aria-label="上一个">↑</button>
+    <button id="searchNext" class="search-nav" aria-label="下一个">↓</button>
+    <button id="searchClose" class="search-nav" aria-label="关闭搜索">✕</button>
+  </div>
 
   <button id="cwdBar" class="cwd-bar hidden" aria-label="切换工作目录"></button>
 
@@ -94,6 +103,7 @@
       <input type="text" id="cwdInput" class="text-input" placeholder="例如 D:\\projects\\my-app" />
       <button id="cwdApply" class="btn btn-allow full">切换工作目录</button>
       <div class="divider"></div>
+      <button id="scanBtn" class="btn btn-allow full">📷 扫码连接电脑</button>
       <label class="field-label">服务器地址</label>
       <input type="text" id="serverInput" class="text-input" placeholder="自动使用当前网址" />
       <label class="field-label">Token</label>
@@ -124,6 +134,7 @@
     <div id="attachBar" class="attach-bar hidden"></div>
     <footer class="composer">
       <button id="stopBtn" class="icon-btn stop hidden" aria-label="停止">■</button>
+      <button id="micBtn" class="icon-btn mic" aria-label="语音输入">🎙</button>
       <button id="attachBtn" class="icon-btn attach" aria-label="添加图片">📎</button>
       <input type="file" id="imageInput" accept="image/*" multiple hidden />
       <textarea id="input" class="composer-input" rows="1" placeholder="给 Claude 下指令…"></textarea>
@@ -134,10 +145,100 @@
   <div id="historyModal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-title">聊天记录</div>
-      <div class="hint">点一条继续之前的对话（保留上下文，省 token）；左侧 ✎ 重命名、🗑 删除。</div>
+      <div class="hint">点一条继续之前的对话（会切到它所在的文件夹并保留上下文，省 token）；右侧 ✎ 重命名、🗑 删除。</div>
       <button id="newConvBtn" class="btn btn-allow full">＋ 开始新对话</button>
+      <input type="text" id="convSearch" class="text-input" placeholder="🔍 搜索标题或文件夹…" style="margin-top:10px" />
       <div class="conv-list" id="convList"></div>
       <button id="historyClose" class="btn-link">关闭</button>
+    </div>
+  </div>
+
+  <div id="screenModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title">电脑屏幕</div>
+      <div class="screen-wrap">
+        <img id="screenImg" class="screen-img" alt="电脑屏幕" />
+        <div id="screenHint" class="hint" style="text-align:center">点「刷新」获取一张电脑当前屏幕</div>
+      </div>
+      <div class="screen-bar">
+        <button id="screenShot" class="btn btn-allow">📸 刷新</button>
+        <label class="btn btn-ghost screen-chk"><input type="checkbox" id="screenAuto" /> 自动</label>
+        <button id="screenCtrlBtn" class="btn btn-allow">🖱 全屏控制</button>
+      </div>
+      <div class="hint" style="text-align:center">点「🖱 全屏控制」把手机变成电脑触屏：轻点=单击、长按=右键、双指缩放，右侧 ⌨ 抽屉里有完整功能键。</div>
+      <button id="screenClose" class="btn-link">关闭</button>
+    </div>
+  </div>
+
+  <!-- 全屏控制模式：手机屏幕＝电脑屏幕。竖屏自动旋转铺满，双指缩放/拖动，功能键侧边抽屉按需展开 -->
+  <div id="ctrlOverlay" class="ctrl-overlay hidden">
+    <div id="ctrlStage" class="ctrl-stage">
+      <div id="ctrlPan" class="ctrl-pan">
+        <img id="ctrlImg" class="ctrl-img" alt="电脑屏幕" />
+      </div>
+    </div>
+    <div id="ctrlRipple" class="ctrl-ripple"></div>
+
+    <div class="ctrl-top">
+      <button id="ctrlExit" class="ctrl-mini" aria-label="退出">✕</button>
+      <span class="ctrl-hint">轻点=单击 · 长按=右键 · 双指缩放/拖动</span>
+      <button id="ctrlRefresh" class="ctrl-mini" aria-label="刷新">↻</button>
+    </div>
+
+    <button id="ctrlHandle" class="ctrl-handle" aria-label="功能键">⌨</button>
+
+    <div id="ctrlDrawer" class="ctrl-drawer">
+      <div class="ctrl-drawer-head">
+        <span>⌨ 按键 / 输入</span>
+        <button id="ctrlDrawerClose" class="ctrl-mini" aria-label="收起">›</button>
+      </div>
+      <div class="ctrl-type">
+        <input type="text" id="ctrlText" class="text-input" placeholder="输入文字发送到电脑…" />
+        <button id="ctrlSend" class="btn btn-allow">发送</button>
+      </div>
+      <div class="ctrl-keys">
+        <button class="kbtn" data-key="{ENTER}">⏎ 回车</button>
+        <button class="kbtn" data-key="{ESC}">Esc</button>
+        <button class="kbtn" data-key="{TAB}">Tab</button>
+        <button class="kbtn" data-key="{BACKSPACE}">⌫ 退格</button>
+        <button class="kbtn" data-key="{DELETE}">Del</button>
+        <button class="kbtn" data-key=" ">空格</button>
+      </div>
+      <div class="ctrl-keys">
+        <button class="kbtn" data-key="{UP}">↑</button>
+        <button class="kbtn" data-key="{DOWN}">↓</button>
+        <button class="kbtn" data-key="{LEFT}">←</button>
+        <button class="kbtn" data-key="{RIGHT}">→</button>
+        <button class="kbtn" data-key="{HOME}">Home</button>
+        <button class="kbtn" data-key="{END}">End</button>
+        <button class="kbtn" data-key="{PGUP}">PgUp</button>
+        <button class="kbtn" data-key="{PGDN}">PgDn</button>
+      </div>
+      <div class="ctrl-keys">
+        <button class="kbtn" data-key="^c">Ctrl+C</button>
+        <button class="kbtn" data-key="^v">Ctrl+V</button>
+        <button class="kbtn" data-key="^x">Ctrl+X</button>
+        <button class="kbtn" data-key="^z">Ctrl+Z</button>
+        <button class="kbtn" data-key="^a">Ctrl+A</button>
+        <button class="kbtn" data-key="^s">Ctrl+S</button>
+        <button class="kbtn" data-key="^f">Ctrl+F</button>
+      </div>
+      <div class="ctrl-keys">
+        <button class="kbtn" data-combo="alttab">Alt+Tab 切窗口</button>
+        <button class="kbtn" data-combo="win">⊞ 开始菜单</button>
+        <button class="kbtn" data-combo="wind">⊞ 显示桌面</button>
+        <button class="kbtn" data-combo="wintab">⊞ 多任务</button>
+      </div>
+      <div class="ctrl-keys">
+        <button class="kbtn" data-act="dblclick">🖱 双击（上次位置）</button>
+        <button class="kbtn" data-act="rclick">🖱 右键（上次位置）</button>
+      </div>
+      <div class="ctrl-keys">
+        <button class="kbtn" data-key="{F2}">F2</button>
+        <button class="kbtn" data-key="{F5}">F5</button>
+        <button class="kbtn" data-key="{F11}">F11</button>
+        <button class="kbtn" data-key="{F12}">F12</button>
+      </div>
     </div>
   </div>
 

@@ -1,4 +1,4 @@
-const CACHE = "claude-remote-v6";
+const CACHE = "claude-remote-v18";
 const ASSETS = ["./", "./index.html", "./app.js", "./styles.css", "./manifest.webmanifest", "./icon.svg", "./jsqr.min.js"];
 
 self.addEventListener("install", (e) => {

@@ -1,0 +1,32 @@
+// 把下面的 "requestPermissions" 字段合并进你工程的
+//   entry/src/main/module.json5  里的  "module": { ... }  对象内。
+// （INTERNET 是连电脑必须的；CAMERA 只有用 App 内扫码才需要，免扫码可不加。）
+//
+// 合并后大致长这样：
+// {
+//   "module": {
+//     "name": "entry",
+//     "type": "entry",
+//     ...原有内容...,
+//     "requestPermissions": [
+//       { "name": "ohos.permission.INTERNET" },
+//       {
+//         "name": "ohos.permission.CAMERA",
+//         "reason": "$string:cam_reason",
+//         "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+//       }
+//     ]
+//   }
+// }
+
+"requestPermissions": [
+  { "name": "ohos.permission.INTERNET" },
+  {
+    "name": "ohos.permission.CAMERA",
+    "reason": "$string:cam_reason",
+    "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+  }
+]
+
+// 若加了 CAMERA，记得在 entry/src/main/resources/base/element/string.json 的 "string" 数组里补一条：
+//   { "name": "cam_reason", "value": "扫码连接电脑需要使用摄像头" }

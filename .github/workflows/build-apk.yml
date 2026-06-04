@@ -9,6 +9,10 @@ on:
       - "app-android/**"
       - ".github/workflows/build-apk.yml"
 
+# 让各 action 用 Node 24 运行，消除 GitHub 关于 Node 20 即将弃用的告警
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
