@@ -1,4 +1,4 @@
-# 📱 手机遥控 Claude Code
+# 📱 手机遥控 Claude Code · Phone Remote for Claude Code
 
 > 在电脑上跑一个小服务，手机就能远程指挥电脑里的 **Claude Code**：下指令、看流式输出、
 > 一键同意 / 拒绝权限、看电脑实时屏幕，甚至把手机当触屏直接操控电脑。
@@ -6,6 +6,22 @@
 
 用你 Claude Code 现有的登录驱动，**不需要单独的 API key**。电脑端一个 `node` 服务搞定 HTTP + WebSocket +
 公网隧道 + 截屏 + 远程控制；手机端是一个网页（PWA，可装到主屏幕像 App），也可打包成安卓 APK / 鸿蒙原生应用。
+
+---
+
+### 🌍 English
+
+Run a tiny server on your PC and drive **Claude Code** from your phone — anywhere.
+
+- 📝 **Send prompts on the go** and watch live streaming output (incl. thinking).
+- ✅ **Approve / deny permission requests with one tap** (or flip on full-auto).
+- 🗂️ **Browse & resume** your desktop Claude Code conversations (saves tokens).
+- 🖥️ **See your computer's live screen**, and 🖱️ **use your phone as a touchscreen** to control the PC (tap = click, long-press = right-click, pinch to zoom, full on-screen keyboard).
+- 🌐 **Works from outside your network** via a built-in Cloudflare tunnel + a one-time-scan auto-reconnect rendezvous.
+
+Uses your existing Claude Code login — **no separate API key needed**. The phone client is a **PWA** (installable to the home screen, works on Android / iOS / HarmonyOS); it can also be packaged as an **Android APK** or a **native HarmonyOS (ArkTS) app**. Drop an `ffmpeg.exe` into the folder for signed, antivirus-friendly, DPI-correct screen capture.
+
+> Detailed docs below are in Chinese — feel free to open an issue if you'd like an English walkthrough.
 
 ---
 
