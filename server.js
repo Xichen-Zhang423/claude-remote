@@ -1336,3 +1336,4 @@ function shutdownAll() {
   process.exit(0);
 }
 process.on("SIGINT", shutdownAll);
+process.on("SIGTERM", shutdownAll); // 被脚本/系统 kill 时也把隧道、防睡眠一起清掉，不留孤儿进程

@@ -30,6 +30,9 @@ ln -s "$(which cloudflared)" cloudflared.exe   # server.js 按此文件名找隧
 ./start.sh
 ```
 
+日常开关推荐用 Finder 双击 **`启动遥控.command`**（后台运行 + 自动弹出二维码控制台，关终端窗口不影响）
+和 **`停止遥控.command`**（服务/隧道/防睡眠一起停，对应 Windows 的 `停止遥控.bat`）。
+
 ### 必要的系统授权（系统设置 → 隐私与安全性）
 
 | 权限 | 给谁 | 干什么用 |
