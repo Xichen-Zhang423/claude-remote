@@ -8,7 +8,6 @@ app-android/android/
 # 敏感 / 私人数据 —— 千万别推到 GitHub
 config.json
 conversations/
-cloudflare-worker/wrangler.toml
 
 # 体积太大的二进制（自行下载，不入库）
 cloudflared.exe
