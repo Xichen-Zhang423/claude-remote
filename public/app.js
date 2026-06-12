@@ -432,7 +432,6 @@ function handle(m) {
       updateCwdBar();
       if (m.model) setSelect("modelSelect", m.model);
       if (m.effort) setSelect("effortSelect", m.effort);
-      applyPlatform(m.platform);
       break;
     case "conversations":
       convCache = m.list || [];
@@ -762,35 +761,6 @@ $("settingsClose").onclick = () => $("settingsModal").classList.add("hidden");
 $("cwdApply").onclick = () => {
   const p = $("cwdInput").value.trim();
   if (p) { send({ type: "setCwd", path: p }); addMsg("system", "切换工作目录: " + p); $("settingsModal").classList.add("hidden"); }
-};
-// 电脑端是 Mac 时：按键标签换成 Mac 习惯（发送的指令不变，由服务端翻译成 ⌘ 组合键），
-// 并显示 Mac 专属的「熄屏锁定 / 唤醒屏幕」按钮；Windows 后端保持原有界面
-const MAC_KEY_LABELS = { "^c": "⌘C 复制", "^v": "⌘V 粘贴", "^x": "⌘X 剪切", "^z": "⌘Z 撤销", "^a": "⌘A 全选", "^s": "⌘S 保存", "^f": "⌘F 查找" };
-const MAC_COMBO_LABELS = { alttab: "⌘Tab 切窗口", win: "🔍 Spotlight", wind: "显示桌面", wintab: "调度中心" };
-function applyPlatform(platform) {
-  const mac = platform === "darwin";
-  if (mac) {
-    document.querySelectorAll(".kbtn[data-key]").forEach((b) => { if (MAC_KEY_LABELS[b.dataset.key]) b.textContent = MAC_KEY_LABELS[b.dataset.key]; });
-    document.querySelectorAll(".kbtn[data-combo]").forEach((b) => { if (MAC_COMBO_LABELS[b.dataset.combo]) b.textContent = MAC_COMBO_LABELS[b.dataset.combo]; });
-  }
-  $("displaySleepBtn").style.display = mac ? "" : "none";
-  $("wakeDisplayBtn").style.display = mac ? "" : "none";
-}
-// 电源：熄屏锁定（可远程恢复）/ 唤醒屏幕 / 深度睡眠（断连，需到电脑前唤醒）
-$("displaySleepBtn").onclick = () => {
-  send({ type: "displaySleep" });
-  addMsg("system", "🌙 已让电脑熄屏（仍在运行，可随时继续遥控）");
-  $("settingsModal").classList.add("hidden");
-};
-$("wakeDisplayBtn").onclick = () => {
-  send({ type: "wakeDisplay" });
-  $("settingsModal").classList.add("hidden");
-};
-$("sleepBtn").onclick = () => {
-  if (!confirm("确定让电脑进入睡眠？\n\n连接会立刻断开，且手机无法远程唤醒，需到电脑前按键唤醒。")) return;
-  send({ type: "sleepComputer" });
-  addMsg("system", "💤 已让电脑睡眠（连接将断开）");
-  $("settingsModal").classList.add("hidden");
 };
 $("connApply").onclick = () => {
   const s = $("serverInput").value.trim();

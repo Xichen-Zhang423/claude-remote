@@ -5,7 +5,7 @@
 > 再也不用守在电脑前一直点 yes。
 
 用你 Claude Code 现有的登录驱动，**不需要单独的 API key**。电脑端一个 `node` 服务搞定 HTTP + WebSocket +
-公网隧道 + 截屏 + 远程控制，**Windows 和 macOS 都支持**；手机端是一个网页（PWA），也可打包成安卓 APK / 鸿蒙原生应用。
+公网隧道 + 截屏 + 远程控制；手机端是一个网页（PWA，可装到主屏幕像 App），也可打包成安卓 APK / 鸿蒙原生应用。
 
 ---
 
@@ -19,7 +19,7 @@ Run a tiny server on your PC and drive **Claude Code** from your phone — anywh
 - 🖥️ **See your computer's live screen**, and 🖱️ **use your phone as a touchscreen** to control the PC (tap = click, long-press = right-click, pinch to zoom, full on-screen keyboard).
 - 🌐 **Works from outside your network** via a built-in Cloudflare tunnel + a one-time-scan auto-reconnect rendezvous.
 
-Uses your existing Claude Code login — **no separate API key needed**. The host runs on **Windows or macOS**. The phone client is a **PWA** (works on Android / iOS / HarmonyOS); it can also be packaged as an **Android APK** or a **native HarmonyOS (ArkTS) app**. On Windows, drop an `ffmpeg.exe` into the folder for signed, antivirus-friendly, DPI-correct screen capture.
+Uses your existing Claude Code login — **no separate API key needed**. The phone client is a **PWA** (installable to the home screen, works on Android / iOS / HarmonyOS); it can also be packaged as an **Android APK** or a **native HarmonyOS (ArkTS) app**. Drop an `ffmpeg.exe` into the folder for signed, antivirus-friendly, DPI-correct screen capture.
 
 > Detailed docs below are in Chinese — feel free to open an issue if you'd like an English walkthrough.
 
@@ -33,9 +33,7 @@ Uses your existing Claude Code login — **no separate API key needed**. The hos
 - 🖥️ **看电脑屏幕**：手机上实时（连环抓帧）看电脑当前画面。
 - 🖱️ **全屏远程控制**：手机变成电脑触屏——轻点单击、长按右键、双指缩放、侧边抽屉里有完整功能键（Alt+Tab 等）。
 - 🎙️ **语音输入**、📎 **发图片**、⚡ **快捷命令**、🔍 **对话内搜索**、🌙 暗色 Markdown 界面。
-- 💤 **远程电源管理**：手机上一键让电脑睡眠（收工用）；Mac 还支持「熄屏锁定」（屏幕关了电脑继续干活，随时远程唤醒屏幕继续）。
 - 🌐 **出门也能连**：内置 Cloudflare 隧道 + 云端中转，扫一次码以后自动连，地址变了也不用重扫。
-- 🍎 **Windows / macOS 双平台**：界面按平台自适应（Mac 后端时按键自动变成 ⌘ 组合、Spotlight、调度中心）。
 
 ---
 
@@ -43,16 +41,13 @@ Uses your existing Claude Code login — **no separate API key needed**. The hos
 
 ```
 claude-remote/
-├── server.js              # ★ 电脑端主程序（HTTP + WebSocket + 隧道 + 截屏 + 控制，一个文件全包，Win/Mac 通用）
+├── server.js              # ★ 电脑端主程序（HTTP + WebSocket + 隧道 + 截屏 + 控制，一个文件全包）
 ├── package.json
-├── start.bat              # ★ Windows 一键启动（在家 + 出门都用这个）
+├── start.bat              # ★ 一键启动（在家 + 出门都用这个）
 ├── start-remote.bat       #   同上（保留别名）
-├── 停止遥控.bat            #   Windows：彻底关掉本工具的所有后台进程（打游戏前用）
+├── 停止遥控.bat            #   打游戏前用：彻底关掉本工具的所有后台进程
 ├── 设置开机自启.bat / 取消开机自启.bat   # 开 / 关 随 Windows 自启
-├── 创建桌面图标.bat        #   Windows：生成桌面快捷方式
-├── start.sh               # ★ macOS / Linux 一键启动（自动跟随系统代理）
-├── 启动遥控.command        #   macOS：双击后台启动 + 自动弹出二维码控制台
-├── 停止遥控.command        #   macOS：双击停止（服务 / 隧道 / 防睡眠一起清干净）
+├── 创建桌面图标.bat        #   生成桌面快捷方式
 ├── public/                # 手机网页端（PWA：index.html / app.js / styles.css / sw.js …）
 ├── scripts/               # 电脑端 PowerShell 小工具
 │   ├── screenshot.ps1     #   截屏（兜底；优先用 ffmpeg）
@@ -68,7 +63,6 @@ claude-remote/
 
 > ⚠️ `ffmpeg.exe`、`cloudflared.exe`、`config.json`、`conversations/` 不入库（见 `.gitignore`）——
 > 二进制自行下载、`config.json` 含你的连接密钥不能公开。
-> macOS 端的实现细节（截屏 / 控制 / 电源 / 权限）见 [docs/macOS支持说明.md](docs/macOS支持说明.md)。
 
 ---
 
@@ -78,8 +72,6 @@ claude-remote/
 
 前提：电脑装了 [Node.js](https://nodejs.org) 和 Claude Code，并且 `claude` 已登录（平时用 VSCode 插件就说明已登录）。
 
-#### 🪟 Windows
-
 双击 **`start.bat`**，或在本文件夹打开终端：
 
 ```powershell
@@ -87,23 +79,7 @@ npm install   # 第一次才需要
 npm start
 ```
 
-#### 🍎 macOS
-
-首次准备（终端里执行一次）：
-
-```sh
-brew install cloudflared cliclick          # 隧道工具 + 鼠标键盘注入工具
-ln -s "$(which cloudflared)" cloudflared.exe   # server.js 按此文件名找隧道程序
-```
-
-日常使用：在 Finder 双击 **`启动遥控.command`**（后台运行，弹出的终端窗口可以关），
-用完双击 **`停止遥控.command`**。也可在终端跑 `./start.sh`（Ctrl+C 停止）。
-
-还需在 **系统设置 → 隐私与安全性** 给「启动服务的那个应用」（终端 / VS Code）授两个权限：
-**屏幕录制**（截屏用，授权后要重启该应用）和 **辅助功能**（远程鼠标键盘用）。
-注意权限跟着启动方式走：平时从终端双击启动，就给「终端」授权。
-
-两个平台启动后都会自动：弹出控制台网页、生成二维码（同 WiFi 扫码直连）、起 Cloudflare 公网隧道（出门用）、防止电脑睡眠（Mac 上屏幕可正常熄灭、合盖仍会睡）。
+启动后会自动：弹出控制台窗口、生成二维码（同 WiFi 扫码直连）、起 Cloudflare 公网隧道（出门用）、防止电脑睡眠。
 
 ### 电脑端都包含什么
 
@@ -116,10 +92,6 @@ ln -s "$(which cloudflared)" cloudflared.exe   # server.js 按此文件名找隧
 | **`ffmpeg.exe`**（自行放入） | 抓屏首选。有数字签名、杀毒不拦、原生物理分辨率。没有它就退回 PowerShell 截屏。 |
 | **`cloudflared.exe`**（自带） | Cloudflare 临时隧道，给手机一个公网 https 地址。 |
 | **控制台网页 `public/panel.html`** | 电脑上自动打开的小窗：看二维码 / 公网地址 / 在线手机数 / 日志，可重开隧道、退出。 |
-
-> 🍎 macOS 上不用 PowerShell / ffmpeg：截屏走系统自带 `screencapture`（缩到 1280 宽省流量）、
-> 远程控制走 `cliclick`（手机发的 Ctrl+C / Alt+Tab 等自动翻译成 ⌘C / ⌘Tab）、防睡眠走 `caffeinate`。
-> 详见 [docs/macOS支持说明.md](docs/macOS支持说明.md)。
 
 ---
 
@@ -152,24 +124,10 @@ ln -s "$(which cloudflared)" cloudflared.exe   # server.js 按此文件名找隧
 
 电脑留在家，手机用流量也能连：
 
-- **最简单**：启动脚本已内置 Cloudflare 隧道，启动即自动生成带 token 的二维码，手机扫一下就用。
-- **免重扫（可选配一次）**：临时隧道地址每次重启会变。配一个 **Cloudflare Worker「中转站」**，电脑每次把新地址上报、
+- **最简单**：`start.bat` 已内置 `cloudflared.exe`，启动即自动起隧道、生成带 token 的二维码，手机扫一下就用。
+- **免重扫（推荐配一次）**：临时隧道地址每次重启会变。配一个 **Cloudflare Worker「中转站」**，电脑每次把新地址上报、
   手机打开先问中转站要当前地址——**扫一次以后永久自动连**。中转站只存网址、不存 token，安全。
   配置见 [docs/免扫码连接说明.md](docs/免扫码连接说明.md)。
-
-### 💡 推荐工作流（按需开关，简单可靠）
-
-服务不必常开。把它当成「出门才开的电闸」：
-
-1. **出门前**：双击启动（Windows `start.bat` / Mac `启动遥控.command`）→ 控制台弹出二维码 → 手机扫一下 → 走人。
-2. **在外面**：手机上指挥 Claude、批权限。页面被划掉了？重新打开浏览器即可——连接信息存在手机本地，
-   只要电脑端还开着，**会自动重连，不用重新扫码**。
-3. **干完活**：手机 ⚙ 设置 → 电源区：
-   - Mac 推荐 **🌙 熄屏锁定**——屏幕关掉省电，电脑继续干活，之后随时 **☀️ 唤醒屏幕** 接着远程用；
-   - 真收工就 **💤 让电脑睡眠**——注意睡眠后**无法远程唤醒**（隧道随系统挂起），要到电脑前才能弄醒。
-4. **回家后**：双击停止（`停止遥控.bat` / `停止遥控.command`），公网入口关闭，干净省电。
-
-> 每次重启服务隧道地址都会变，出门前重扫一次码即可——链路最短、最不容易出幺蛾子。
 
 ---
 
@@ -187,10 +145,6 @@ ln -s "$(which cloudflared)" cloudflared.exe   # server.js 按此文件名找隧
 
 不想下 ffmpeg，也可把本文件夹加进 Defender 排除项：设置 → 隐私和安全性 → Windows 安全中心 →
 病毒和威胁防护 → 管理设置 → 排除项 → 文件夹。
-
-> 🍎 **macOS 不需要 ffmpeg**：截屏用系统自带 `screencapture`，控制用 `cliclick`（`brew install cliclick`）。
-> 只要给启动服务的应用授过「屏幕录制」和「辅助功能」两个权限即可（见上「跑起来」一节）。
-> 限制：截屏 / 点击只作用于**主显示器**；中文输入走剪贴板粘贴（会覆盖电脑剪贴板）。
 
 ---
 
@@ -212,7 +166,7 @@ ln -s "$(which cloudflared)" cloudflared.exe   # server.js 按此文件名找隧
 1. **保管好 `config.json` 里的 token**，别发到公开聊天 / 截图 / 仓库里（已在 `.gitignore`）。
 2. 走 Cloudflare 隧道，别把 `8765` 端口裸奔转发到公网。
 3. 不信任的网络别开「全自动」（全自动 = `--dangerously-skip-permissions`，Claude 会自动跑任意命令）。
-4. 不用时关掉服务（控制台「退出」、`停止遥控.bat` 或 Mac 的 `停止遥控.command`）。
+4. 不用时关掉服务（控制台「退出」或 `停止遥控.bat`）。
 
 ---
 
@@ -242,11 +196,6 @@ ln -s "$(which cloudflared)" cloudflared.exe   # server.js 按此文件名找隧
 
 - **手机连不上**：确认电脑端在跑；同 WiFi 走局域网地址；出门走隧道地址；Token 对不对（⚙ 里可重填或重扫）。
 - **没反应 / 会话出错**：看电脑终端报错，多半是 `claude` 没登录——终端跑一次 `claude` 登录后再启动。
-- **（Mac）截图里只有壁纸没有窗口**：没给「屏幕录制」权限。系统设置 → 隐私与安全性 → 屏幕录制 →
-  勾选启动服务的应用（终端 / VS Code），然后重启该应用。
-- **（Mac）远程点击没反应**：没装 cliclick（`brew install cliclick`）或没给「辅助功能」权限。
-- **（Mac）控制台日志提示「上报云端中转失败」**：国内网络直连 workers.dev 不通。`start.sh` 会自动跟随
-  系统代理（Clash 等），确认代理在跑、且用 `start.sh` / `启动遥控.command` 启动即可。
 - **看屏幕用不了 / 提示 `ScriptContainedMaliciousContent`**：是 **Windows Defender** 拦了 PowerShell 抓屏。
   放个 `ffmpeg.exe` 进文件夹（推荐），或把文件夹加进 Defender 排除项。见上「看屏幕」一节。
 - **手机上屏幕右 / 下被裁、点击偏右下**：高分屏缩放导致的 DPI 不一致，已自动按物理分辨率修正；放了 ffmpeg 更彻底。
@@ -260,5 +209,5 @@ MIT。随意使用 / 修改 / 分发，自负风险。详见 [LICENSE](LICENSE)�
 
 ---
 
-> 技术栈：Node.js · Express · ws · @anthropic-ai/claude-agent-sdk · Cloudflare Tunnel/Workers · Capacitor · HarmonyOS ArkTS · PowerShell · ffmpeg · screencapture/cliclick/caffeinate (macOS)。
-> 手把手图文教程见 [docs/使用教程.md](docs/使用教程.md)；macOS 细节见 [docs/macOS支持说明.md](docs/macOS支持说明.md)。
+> 技术栈：Node.js · Express · ws · @anthropic-ai/claude-agent-sdk · Cloudflare Tunnel/Workers · Capacitor · HarmonyOS ArkTS · PowerShell · ffmpeg。
+> 手把手图文教程见 [docs/使用教程.md](docs/使用教程.md)。
