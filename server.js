@@ -352,7 +352,17 @@ function restartTunnel() {
 // 防睡眠（运行期间电脑不睡，屏幕可熄）
 let keepAwakeProc = null;
 function startKeepAwake() {
-  if (process.platform !== "win32" || keepAwakeProc) return;
+  if (keepAwakeProc) return;
+  if (process.platform === "darwin") {
+    // macOS：caffeinate -i 防空闲睡眠、-s 接电源时防系统睡眠；屏幕可正常熄灭。合盖仍会睡（系统强制）。
+    try {
+      keepAwakeProc = spawn("/usr/bin/caffeinate", ["-is"], { stdio: "ignore" });
+      keepAwakeProc.on("error", () => {});
+      panelLog("防睡眠已开启（caffeinate，屏幕可熄、合盖仍会睡）");
+    } catch {}
+    return;
+  }
+  if (process.platform !== "win32") return;
   const ps = [
     "$s = '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint e);';",
     "$t = Add-Type -MemberDefinition $s -Name P -Namespace W -PassThru;",
@@ -722,15 +732,30 @@ function psShot(outFile) {
     });
   });
 }
+// macOS：系统自带 screencapture 抓主屏（-m），再用 sips 缩到 1280 宽省流量。
+// 首次使用需在 系统设置→隐私与安全性→屏幕录制 里给启动本服务的应用授权，否则图里只有壁纸没有窗口。
+function macShot(outFile) {
+  return new Promise((resolve, reject) => {
+    execFile("/usr/sbin/screencapture", ["-x", "-C", "-m", "-t", "jpg", outFile], { timeout: 15000 }, (err) => {
+      if (err) return reject(err);
+      execFile("/usr/bin/sips", ["--resampleWidth", "1280", outFile], { timeout: 15000 }, () => resolve());
+    });
+  });
+}
 function captureScreen() {
   return new Promise((resolve, reject) => {
-    if (process.platform !== "win32") return reject(new Error("仅支持 Windows 截屏"));
+    if (process.platform !== "win32" && process.platform !== "darwin") return reject(new Error("仅支持 Windows / macOS 截屏"));
     const outFile = path.join(os.tmpdir(), `_crshot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`);
     const readOut = () => fs.readFile(outFile, (rerr, buf) => {
       fs.unlink(outFile, () => {});
       if (rerr || !buf || !buf.length) return reject(new Error("截图为空（截屏程序没出图）"));
       resolve("data:image/jpeg;base64," + buf.toString("base64"));
     });
+    if (process.platform === "darwin") {
+      macShot(outFile).then(readOut).catch((e) =>
+        reject(new Error("截图失败：" + e.message + "（若图里只有壁纸：去 系统设置→隐私与安全性→屏幕录制 给启动本服务的应用授权后重启服务）")));
+      return;
+    }
     const tryPs = () => psShot(outFile).then(readOut).catch((e) =>
       reject(new Error("截图失败：" + e.message + "（PowerShell 抓屏常被 Windows Defender 拦；放一个 ffmpeg.exe 到本程序文件夹即可彻底解决）")));
     if (useFfmpeg === false) return tryPs();
@@ -747,10 +772,82 @@ function captureScreen() {
 // 持续抓屏的长驻脚本(stream.ps1/shot-server.ps1)会被火绒判恶意，已弃用删除。
 
 // ---------- 远程控制电脑（鼠标点击 / 键盘输入）----------
+// macOS 实现：cliclick（brew install cliclick）做鼠标/按键注入，需要 系统设置→隐私与安全性→辅助功能 授权。
+// 坐标：手机发来的 rx/ry 是 0-1 比例，乘以主屏「逻辑分辨率」（NSScreen，和 cliclick 同一坐标系）。
+function findCliclick() {
+  for (const p of ["/opt/homebrew/bin/cliclick", "/usr/local/bin/cliclick"]) if (fs.existsSync(p)) return p;
+  return null;
+}
+let macScreenSize = null;
+function getMacScreenSize() {
+  return new Promise((resolve) => {
+    if (macScreenSize) return resolve(macScreenSize);
+    const js = "ObjC.import('AppKit'); var s = $.NSScreen.mainScreen.frame.size; s.width + ' ' + s.height";
+    execFile("/usr/bin/osascript", ["-l", "JavaScript", "-e", js], { timeout: 8000 }, (err, stdout) => {
+      const m = String(stdout || "").match(/([\d.]+)\s+([\d.]+)/);
+      if (!err && m) macScreenSize = { w: Math.round(+m[1]), h: Math.round(+m[2]) };
+      resolve(macScreenSize || { w: 1440, h: 900 });
+    });
+  });
+}
+// 手机功能键（Windows SendKeys 记法）→ cliclick 按键名；^x 组合键翻译成 Mac 的 ⌘x
+const MAC_KP = {
+  "{ENTER}": "return", "{ESC}": "esc", "{TAB}": "tab", "{BACKSPACE}": "delete", "{DELETE}": "fwd-delete",
+  " ": "space", "{UP}": "arrow-up", "{DOWN}": "arrow-down", "{LEFT}": "arrow-left", "{RIGHT}": "arrow-right",
+  "{HOME}": "home", "{END}": "end", "{PGUP}": "page-up", "{PGDN}": "page-down",
+  "{F2}": "f2", "{F5}": "f5", "{F11}": "f11", "{F12}": "f12",
+};
+const MISSION_CONTROL = "/System/Applications/Mission Control.app/Contents/MacOS/Mission Control";
+function macControl(m) {
+  return new Promise((resolve, reject) => {
+    const cli = findCliclick();
+    if (!cli) return reject(new Error("缺少 cliclick（终端运行 brew install cliclick 安装）"));
+    const fail = (e) => reject(new Error(e.message.split("\n")[0] + "（若是权限问题：系统设置→隐私与安全性→辅助功能 里给启动本服务的应用授权）"));
+    const runCli = (args, done) => execFile(cli, args, { timeout: 8000 }, (err) => (err ? fail(err) : (done ? done() : resolve())));
+    const action = String(m.action || "ping");
+    if (["click", "dblclick", "rclick", "move"].includes(action)) {
+      getMacScreenSize().then((s) => {
+        const x = Math.round(Math.max(0, Math.min(1, Number(m.rx) || 0)) * (s.w - 1));
+        const y = Math.round(Math.max(0, Math.min(1, Number(m.ry) || 0)) * (s.h - 1));
+        runCli([{ click: "c", dblclick: "dc", rclick: "rc", move: "m" }[action] + `:${x},${y}`]);
+      });
+      return;
+    }
+    if (action === "key") {
+      const t = String(m.text || "");
+      if (MAC_KP[t]) return runCli(["kp:" + MAC_KP[t]]);
+      const combo = /^\^([a-z])$/.exec(t);
+      if (combo) return runCli(["kd:cmd", "t:" + combo[1], "ku:cmd"]);
+      return runCli(["t:" + t]);
+    }
+    if (action === "type") {
+      const t = String(m.text || "");
+      if (!t) return resolve();
+      // 含中文等非 ASCII 时 cliclick 打不出来：改走剪贴板 + ⌘V 粘贴（会覆盖电脑剪贴板）
+      if (/^[\x20-\x7e]*$/.test(t)) return runCli(["t:" + t]);
+      const pb = spawn("/usr/bin/pbcopy");
+      pb.on("error", fail);
+      pb.on("close", () => runCli(["kd:cmd", "t:v", "ku:cmd"]));
+      pb.stdin.end(t);
+      return;
+    }
+    if (action === "combo") {
+      switch (String(m.text || "")) {
+        case "alttab": return runCli(["kd:cmd", "kp:tab", "ku:cmd"]);            // ⌘Tab 切窗口
+        case "win": return runCli(["kd:cmd", "kp:space", "ku:cmd"]);             // ⌘空格 Spotlight
+        case "wind": return execFile(MISSION_CONTROL, ["1"], { timeout: 8000 }, (e) => (e ? fail(e) : resolve())); // 显示桌面
+        case "wintab": return execFile(MISSION_CONTROL, [], { timeout: 8000 }, (e) => (e ? fail(e) : resolve()));  // 调度中心
+        default: return resolve();
+      }
+    }
+    resolve();
+  });
+}
 const CTRL_PS1 = path.join(__dirname, "scripts", "control.ps1");
 function controlPC(m) {
   return new Promise((resolve, reject) => {
-    if (process.platform !== "win32") return reject(new Error("仅支持 Windows"));
+    if (process.platform === "darwin") return macControl(m).then(resolve, reject);
+    if (process.platform !== "win32") return reject(new Error("仅支持 Windows / macOS"));
     if (!fs.existsSync(CTRL_PS1)) return reject(new Error("缺少 control.ps1"));
     const action = String(m.action || "ping");
     const args = ["-NoProfile", "-NonInteractive", "-File", CTRL_PS1, "-action", action];
@@ -951,6 +1048,30 @@ function handleCommon(m, ws) {
     case "renameConversation":
       if (m.id) renameConv(m.id, m.title);
       return true;
+    case "sleepComputer":
+      // 深度睡眠：隧道随系统挂起，手机将断开且无法远程唤醒，需到电脑前唤醒
+      panelLog("💤 收到指令：电脑进入睡眠（远程将断开）");
+      broadcast({ type: "notice", message: "电脑即将睡眠：连接会断开，需到电脑前唤醒后才能继续遥控" });
+      setTimeout(() => {
+        if (process.platform === "darwin") exec("pmset sleepnow");
+        else if (process.platform === "win32") exec("rundll32.exe powrprof.dll,SetSuspendState 0,1,0");
+      }, 800);
+      return true;
+    case "displaySleep":
+      // 熄屏锁定：只熄屏幕，机器和服务继续跑，手机随时可「唤醒屏幕」继续干活
+      if (process.platform === "darwin") {
+        panelLog("🌙 收到指令：熄屏锁定（服务继续运行，可远程唤醒）");
+        broadcast({ type: "notice", message: "已熄屏：电脑仍在运行，随时可在手机上继续，或点「唤醒屏幕」点亮" });
+        exec("pmset displaysleepnow");
+      }
+      return true;
+    case "wakeDisplay":
+      if (process.platform === "darwin") {
+        panelLog("☀️ 收到指令：唤醒屏幕");
+        exec("caffeinate -u -t 2");
+        try { ws.send(JSON.stringify({ type: "notice", message: "屏幕已唤醒" })); } catch {}
+      }
+      return true;
     case "screenshot":
       captureScreen()
         .then((d) => { try { ws.send(JSON.stringify({ type: "screenshot", data: d, at: Date.now() })); } catch {} })
@@ -992,6 +1113,7 @@ wssPhone.on("connection", (ws, req) => {
     model: runtime.model,
     effort: runtime.effort,
     convId: currentConvId,
+    platform: process.platform, // 手机端据此切换按键标签（win32/darwin）和平台专属按钮
   }));
   if (lastInit) ws.send(JSON.stringify(lastInit));
   if (transcript.length) ws.send(JSON.stringify({ type: "history", events: transcript.slice() }));
@@ -1214,3 +1336,4 @@ function shutdownAll() {
   process.exit(0);
 }
 process.on("SIGINT", shutdownAll);
+process.on("SIGTERM", shutdownAll); // 被脚本/系统 kill 时也把隧道、防睡眠一起清掉，不留孤儿进程
